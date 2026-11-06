@@ -15,7 +15,7 @@
 <script>
   // Diese Seite wird vom Server per HTTP ausgeliefert (nicht als nui://), damit YouTube eine
   // gueltige Herkunft sieht (sonst "Fehler 153"). Gesteuert wird sie per Nachricht vom Skript.
-  let yt = null, apiReady = false, curId = null, last = null, twitchSet = false;
+  let yt = null, apiReady = false, curId = null, last = null, twitchSet = false, seeked = false;
 
   function onYouTubeIframeAPIReady() { apiReady = true; if (last && last.action === 'yt') playYt(last); }
 
@@ -29,13 +29,20 @@
   function applyYt(d) {
     if (!yt || typeof yt.setVolume !== 'function') return;
     yt.setVolume(Math.round(Math.max(0, Math.min(1, d.volume ?? 1)) * 100));
-    const t = typeof yt.getCurrentTime === 'function' ? yt.getCurrentTime() : 0;
-    // Laeuft der Link laenger als das Video, laeuft es synchron in einer Schleife (Zeit modulo Laenge),
-    // statt am Ende zu stehen, wo YouTube andere Videos vorschlaegt.
-    let target = d.start || 0;
-    const dur = typeof yt.getDuration === 'function' ? yt.getDuration() : 0;
-    if (dur > 1) target = target % dur;
-    if (Math.abs(t - target) > 3 && typeof yt.seekTo === 'function') yt.seekTo(target, true);
+    // Nur EINMAL beim Laden zur Startposition springen (fuer Zuschauer, die spaeter dazukommen).
+    // Danach nie wieder: Werbung vor dem Video verzoegert den Start, und ein Nachspringen wuerde
+    // das Video um die Werbedauer ueberspringen. Laeuft der Link laenger als das Video, wird modulo
+    // der Laenge gesprungen, sobald die Laenge bekannt ist.
+    if (!seeked) {
+      const raw = d.start || 0;
+      const dur = typeof yt.getDuration === 'function' ? yt.getDuration() : 0;
+      if (raw <= 5) {
+        seeked = true;
+      } else if (dur > 1 && typeof yt.seekTo === 'function') {
+        yt.seekTo(raw % dur, true);
+        seeked = true;
+      }
+    }
     if (d.paused) yt.pauseVideo(); else yt.playVideo();
   }
 
@@ -46,11 +53,16 @@
     if (yt) { try { yt.destroy(); } catch (e) {} yt = null; }
     fresh();
     curId = d.id;
+    seeked = false;
     yt = new YT.Player('p', {
       videoId: d.id,
-      playerVars: { autoplay: 1, controls: 0, disablekb: 1, modestbranding: 1, rel: 0, iv_load_policy: 3, fs: 0, playsinline: 1 },
+      // cc_load_policy 0 + unloadModule: keine Untertitel (der Browser hat kein Konto, YouTube nimmt sonst die Standardspur)
+      playerVars: { autoplay: 1, controls: 0, disablekb: 1, modestbranding: 1, rel: 0, iv_load_policy: 3, fs: 0, playsinline: 1, cc_load_policy: 0, hl: 'de' },
       events: {
-        onReady: () => applyYt(last),
+        onReady: () => {
+          try { yt.unloadModule('captions'); yt.unloadModule('cc'); } catch (e) {}
+          applyYt(last);
+        },
         // Video zu Ende: sofort von vorn, damit nie der Endbildschirm mit Vorschlaegen erscheint
         onStateChange: (e) => { if (e.data === 0) { e.target.seekTo(0, true); e.target.playVideo(); } },
       },
