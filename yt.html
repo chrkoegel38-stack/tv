@@ -15,7 +15,7 @@
 <script>
   // Diese Seite wird vom Server per HTTP ausgeliefert (nicht als nui://), damit YouTube eine
   // gueltige Herkunft sieht (sonst "Fehler 153"). Gesteuert wird sie per Nachricht vom Skript.
-  let yt = null, apiReady = false, curId = null, last = null, twitchSet = false, seeked = false;
+  let yt = null, apiReady = false, curId = null, last = null, twitchSet = false, seekDecided = false, wantSeek = false;
 
   function onYouTubeIframeAPIReady() { apiReady = true; if (last && last.action === 'yt') playYt(last); }
 
@@ -33,14 +33,18 @@
     // Danach nie wieder: Werbung vor dem Video verzoegert den Start, und ein Nachspringen wuerde
     // das Video um die Werbedauer ueberspringen. Laeuft der Link laenger als das Video, wird modulo
     // der Laenge gesprungen, sobald die Laenge bekannt ist.
-    if (!seeked) {
-      const raw = d.start || 0;
+    // Ob gesprungen wird, wird GLEICH BEIM ERSTEN Aufruf entschieden: Wer den Link selbst startet (Position
+    // nahe 0), springt nie. Nur wer spaeter dazukommt, springt einmal zur Live-Position. So kann die
+    // Werbung vorn nicht mehr dazu fuehren, dass nach der Werbung Sekunden uebersprungen werden.
+    if (!seekDecided) {
+      seekDecided = true;
+      wantSeek = (d.start || 0) > 10;
+    }
+    if (wantSeek) {
       const dur = typeof yt.getDuration === 'function' ? yt.getDuration() : 0;
-      if (raw <= 5) {
-        seeked = true;
-      } else if (dur > 1 && typeof yt.seekTo === 'function') {
-        yt.seekTo(raw % dur, true);
-        seeked = true;
+      if (dur > 1 && typeof yt.seekTo === 'function') {
+        yt.seekTo((d.start || 0) % dur, true);
+        wantSeek = false;
       }
     }
     if (d.paused) yt.pauseVideo(); else yt.playVideo();
@@ -53,7 +57,8 @@
     if (yt) { try { yt.destroy(); } catch (e) {} yt = null; }
     fresh();
     curId = d.id;
-    seeked = false;
+    seekDecided = false;
+    wantSeek = false;
     yt = new YT.Player('p', {
       videoId: d.id,
       // cc_load_policy 0 + unloadModule: keine Untertitel (der Browser hat kein Konto, YouTube nimmt sonst die Standardspur)
