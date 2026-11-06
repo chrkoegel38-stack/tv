@@ -30,7 +30,12 @@
     if (!yt || typeof yt.setVolume !== 'function') return;
     yt.setVolume(Math.round(Math.max(0, Math.min(1, d.volume ?? 1)) * 100));
     const t = typeof yt.getCurrentTime === 'function' ? yt.getCurrentTime() : 0;
-    if (Math.abs(t - (d.start || 0)) > 3 && typeof yt.seekTo === 'function') yt.seekTo(d.start || 0, true);
+    // Laeuft der Link laenger als das Video, laeuft es synchron in einer Schleife (Zeit modulo Laenge),
+    // statt am Ende zu stehen, wo YouTube andere Videos vorschlaegt.
+    let target = d.start || 0;
+    const dur = typeof yt.getDuration === 'function' ? yt.getDuration() : 0;
+    if (dur > 1) target = target % dur;
+    if (Math.abs(t - target) > 3 && typeof yt.seekTo === 'function') yt.seekTo(target, true);
     if (d.paused) yt.pauseVideo(); else yt.playVideo();
   }
 
@@ -43,8 +48,12 @@
     curId = d.id;
     yt = new YT.Player('p', {
       videoId: d.id,
-      playerVars: { autoplay: 1, controls: 0, disablekb: 1, modestbranding: 1, rel: 0, iv_load_policy: 3, fs: 0, playsinline: 1, start: Math.floor(d.start || 0) },
-      events: { onReady: () => applyYt(last) },
+      playerVars: { autoplay: 1, controls: 0, disablekb: 1, modestbranding: 1, rel: 0, iv_load_policy: 3, fs: 0, playsinline: 1 },
+      events: {
+        onReady: () => applyYt(last),
+        // Video zu Ende: sofort von vorn, damit nie der Endbildschirm mit Vorschlaegen erscheint
+        onStateChange: (e) => { if (e.data === 0) { e.target.seekTo(0, true); e.target.playVideo(); } },
+      },
     });
   }
 
